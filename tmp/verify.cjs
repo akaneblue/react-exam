@@ -1,0 +1,47 @@
+const { chromium } = require('C:/Users/user/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const assert = require('node:assert/strict');
+(async () => {
+ const browser = await chromium.launch({headless:true, channel:"msedge"});
+ const page = await browser.newPage({viewport:{width:1280,height:900}});
+ const errors=[]; page.on('pageerror', e=>errors.push(e.message));
+ await page.goto('http://127.0.0.1:5173/');
+ await page.locator('.card').last().waitFor();
+ assert.equal(await page.locator('.card').count(),6);
+ assert.ok((await page.locator('.card').first().innerText()).includes('25,000원'));
+ const positions = await page.locator('.card').evaluateAll(xs=>xs.map(x=>({x:x.offsetLeft,y:x.offsetTop})));
+ assert.equal(positions[0].y,positions[2].y); assert.ok(positions[3].y>positions[0].y);
+ await page.screenshot({path:'tmp/products-desktop.png',fullPage:true});
+ await page.setViewportSize({width:768,height:900});
+ const mobile=await page.locator('.card').evaluateAll(xs=>xs.map(x=>x.offsetTop));
+ assert.ok(mobile.every((y,i)=>i===0||y>mobile[i-1]));
+ await page.setViewportSize({width:390,height:844});
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+ await page.screenshot({path:'tmp/products-mobile.png',fullPage:true});
+ let requests=0;
+ await page.route('https://jsonplaceholder.typicode.com/posts?_limit=10',async route=>{
+ requests++; await route.fulfill({json:Array.from({length:10},(_,i)=>({id:i+1,title:i===0?'Alpha notice':`notice ${i+1}`}))});
+ });
+ await page.getByRole('link',{name:'공지사항',exact:true}).click();
+ await page.locator('.notice-list li').last().waitFor();
+ assert.equal(await page.locator('.notice-list li').count(),10); assert.equal(requests,1);
+ await page.locator('.search').fill('Alpha'); assert.equal(await page.locator('.notice-list li').count(),1);
+ assert.equal(await page.getByRole('status').innerText(),'1건');
+ await page.locator('.search').fill('alpha'); assert.equal(await page.getByRole('status').innerText(),'0건');
+ await page.locator('.search').fill(''); assert.equal(await page.locator('.notice-list li').count(),10);
+ await page.screenshot({path:'tmp/notices-mobile.png',fullPage:true});
+ let logs=0; page.on('console',m=>{if(m.text()==='페이지 로딩...')logs++});
+ await page.getByRole('link',{name:'HOOK 실습'}).click();
+ await page.getByRole('button',{name:'좋아요 추가'}).click();
+ await page.getByRole('button',{name:'좋아요 추가'}).click();
+ assert.equal(await page.getByRole('status').count(),0);
+ assert.ok((await page.locator('main').innerText()).includes('좋아요 2'));
+ await page.getByRole('textbox',{name:'실시간 입력'}).fill('리액트 실습');
+ assert.ok((await page.locator('main').innerText()).includes('입력값:리액트 실습')); assert.equal(logs,1);
+ await page.route('https://jsonplaceholder.typicode.com/posts?_limit=10',r=>r.abort());
+ await page.getByRole('link',{name:'공지사항',exact:true}).click();
+ await page.getByRole('alert').waitFor();
+ assert.deepEqual(errors,[]);
+ console.log('PASS: 상품 6개, 가격, PC 3열, 768px/모바일 1열, 라우팅, API 1회, 검색/대소문자/0건/초기화, HOOK, 오류 안내');
+ await browser.close();
+})().catch(e=>{console.error(e);process.exit(1)});
+
